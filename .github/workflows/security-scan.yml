@@ -1,0 +1,123 @@
+name: Security Scan
+
+on:
+  workflow_dispatch:
+    inputs:
+      repository:
+        description: 'owner/repository to scan (e.g. nestjs/nest)'
+        required: false
+        default: ''
+      branch:
+        description: 'Branch to scan (leave empty for default branch)'
+        required: false
+        default: ''
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scan:
+    name: Security scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: ${{ !github.event.pull_request.head.repo.fork || github.event_name == 'workflow_dispatch' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: |
+            package-lock.json
+            client/package-lock.json
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Install client dependencies
+        run: npm ci
+        working-directory: client
+
+      - name: Build backend
+        run: npm run build
+
+      - name: Install Semgrep CLI
+        run: |
+          python3 -m venv .venv-semgrep
+          .\.venv-semgrep\bin\python.exe -m pip install --upgrade pip
+          .\.venv-semgrep\bin\python.exe -m pip install semgrep
+          .\.venv-semgrep\bin\semgrep --version
+        shell: bash
+        continue-on-error: false
+
+      - name: Resolve scan target
+        id: target
+        shell: bash
+        run: |
+          if [ -n "${{ github.event.inputs.repository }}" ]; then
+            OWNER=$(echo "${{ github.event.inputs.repository }}" | cut -d/ -f1)
+            REPO=$(echo "${{ github.event.inputs.repository }}" | cut -d/ -f2)
+          else
+            OWNER="${GITHUB_REPOSITORY%/*}"
+            REPO="${GITHUB_REPOSITORY#*/}"
+          fi
+          echo "owner=$OWNER" >> "$GITHUB_OUTPUT"
+          echo "repo=$REPO" >> "$GITHUB_OUTPUT"
+          if [ -n "${{ github.event.inputs.branch }}" ]; then
+            echo "branch=${{ github.event.inputs.branch }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "branch=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run security scan
+        id: scan
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SEMGREP_PATH: ${{ github.workspace }}/.venv-semgrep/bin/semgrep
+          SCAN_TARGET_OWNER: ${{ steps.target.outputs.owner }}
+          SCAN_TARGET_REPO: ${{ steps.target.outputs.repo }}
+          SCAN_TARGET_BRANCH: ${{ steps.target.outputs.branch }}
+          SCAN_HISTORY_PATH: scan-results/scan-history.json
+        run: |
+          mkdir -p scan-results
+          set +e
+          node --experimental-vm-modules dist/security-scan-cli.js > scan-results/scan-report.json 2> scan-results/scan-stderr.log
+          SCAN_EXIT=$?
+          set -e
+          echo "scan_exit=$SCAN_EXIT" >> "$GITHUB_OUTPUT"
+          cat scan-results/scan-report.json
+          if [ -s scan-results/scan-stderr.log ]; then
+            echo "--- stderr ---"
+            cat scan-results/scan-stderr.log
+          fi
+          exit $SCAN_EXIT
+
+      - name: Publish scan report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-scan-report
+          path: |
+            scan-results/scan-report.json
+            scan-results/scan-stderr.log
+          retention-days: 30
+
+      - name: Fail on scanner failure
+        if: steps.scan.outcome == 'failure'
+        run: |
+          echo "Security scan failed. Review scan-results/scan-report.json and scan-results/scan-stderr.log."
+          exit 1

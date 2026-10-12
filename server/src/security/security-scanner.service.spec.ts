@@ -1,4 +1,6 @@
 import { Octokit } from '@octokit/rest';
+import { tmpdir } from 'node:os';
+import { resolve } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ScanHistoryService } from './scan-history.service.js';
 import { SecurityScannerService } from './security-scanner.service.js';
@@ -126,7 +128,7 @@ describe('SecurityScannerService npm audit', () => {
     tree.push({ type: 'blob', path: 'src/handler.ts' });
     repositoryFiles.set('src/handler.ts', 'const safe = true;');
     runCommand.mockImplementation(async (command, args, _cwd) => {
-      if (command === 'semgrep') {
+      if (command.includes('semgrep')) {
         return {
           code: 1,
           stdout: JSON.stringify({
@@ -230,7 +232,7 @@ describe('SecurityScannerService npm audit', () => {
     repositoryFiles.set('src/handler.ts', 'const safe = true;');
     const token = 'github_pat_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
     runCommand.mockImplementation(async (command, _args) =>
-      command === 'semgrep'
+      command.includes('semgrep')
         ? {
             code: 1,
             stdout: JSON.stringify({
@@ -273,7 +275,7 @@ describe('SecurityScannerService npm audit', () => {
 
   it('fails instead of reporting a finding outside the scan workspace', async () => {
     runCommand.mockImplementation(async (command, _args) =>
-      command === 'semgrep'
+      command.includes('semgrep')
         ? {
             code: 0,
             stdout: JSON.stringify({
@@ -301,18 +303,26 @@ describe('SecurityScannerService npm audit', () => {
     ['timeout', { code: null, stdout: '', stderr: '', error: 'Scanner timed out.' }, 'failed'],
     ['command failure', { code: 2, stdout: '', stderr: 'Semgrep failed.' }, 'failed'],
   ])('reports Semgrep %s without crashing the repository scan', async (_case, semgrepResult, status) => {
-    runCommand.mockImplementation(async (command, _args) =>
-      command === 'semgrep'
+    const originalPath = process.env.SEMGREP_PATH;
+    process.env.SEMGREP_PATH = resolve(tmpdir(), `nonexistent-semgrep-${Date.now()}.exe`);
+
+    runCommand.mockImplementation(async (_command, _args) =>
+      _command.includes('semgrep')
         ? semgrepResult
         : { code: 0, stdout: JSON.stringify({ vulnerabilities: {} }), stderr: '' },
     );
 
-    const result = await service.scan('owner', 'repository');
+    try {
+      const result = await service.scan('owner', 'repository');
 
-    expect(result.scanners.semgrep.status).toBe(status);
-    expect(result.scanners.semgrep.findings).toBeNull();
-    expect(result.scanners.npmAudit.status).toBe('skipped');
-    expect(result.summary.total).toBe(0);
+      expect(result.scanners.semgrep.status).toBe(status);
+      expect(result.scanners.semgrep.findings).toBeNull();
+      expect(result.scanners.npmAudit.status).toBe('skipped');
+      expect(result.summary.total).toBe(0);
+    } finally {
+      if (originalPath === undefined) delete process.env.SEMGREP_PATH;
+      else process.env.SEMGREP_PATH = originalPath;
+    }
   });
 
   it('audits nested npm projects once and excludes generated directories', async () => {

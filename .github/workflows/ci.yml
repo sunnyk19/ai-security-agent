@@ -1,0 +1,114 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: |
+            package-lock.json
+            client/package-lock.json
+      - name: Install root dependencies
+        run: npm ci
+      - name: Install client dependencies
+        run: npm ci
+        working-directory: client
+      - name: Lint server
+        run: npm run lint
+      - name: Lint client
+        run: npm run lint
+        working-directory: client
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: lint
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: |
+            package-lock.json
+            client/package-lock.json
+      - name: Install root dependencies
+        run: npm ci
+      - name: Install client dependencies
+        run: npm ci
+        working-directory: client
+      - name: Build NestJS backend
+        run: npm run build
+      - name: Build React dashboard
+        run: npm run build
+        working-directory: client
+      - name: Upload backend artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-dist
+          path: dist
+          retention-days: 7
+      - name: Upload frontend artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: client/dist
+          retention-days: 7
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: build
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: |
+            package-lock.json
+            client/package-lock.json
+      - name: Install root dependencies
+        run: npm ci
+      - name: Install client dependencies
+        run: npm ci
+        working-directory: client
+      - name: Download backend artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: backend-dist
+          path: dist
+      - name: Run server tests
+        run: npm test
+      - name: Run server e2e tests
+        run: npm run test:e2e
+      - name: Run client tests
+        run: npm test
+        working-directory: client

@@ -251,6 +251,55 @@
 .no-scan-state { border: 1px dashed #d6ded6; border-radius: 6px; margin-top: 15px; min-height: 200px; }
 .scan-placeholder-icon { align-items: center; background: #e7f0e8; border-radius: 8px; display: flex; height: 42px; justify-content: center; margin-bottom: 3px; width: 42px; }
 .page-footer { border-top: 1px solid var(--line); color: #88938b; display: flex; font-family: var(--mono); font-size: 9px; justify-content: space-between; margin-top: 10px; padding: 15px clamp(22px, 4vw, 58px) 20px; }
+.theme-toggle {
+  align-items: center;
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  color: var(--ink);
+  cursor: pointer;
+  display: inline-flex;
+  font: 500 11px var(--sans);
+  gap: 6px;
+  height: 34px;
+  justify-content: center;
+  padding: 0 11px;
+  transition: background 140ms ease, border-color 140ms ease, color 140ms ease, transform 140ms ease;
+  white-space: nowrap;
+}
+
+.theme-toggle:hover {
+  background: var(--green-soft);
+  border-color: var(--green);
+  color: var(--green);
+  transform: translateY(-1px);
+}
+
+.theme-toggle:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: 2px;
+}
+
+.theme-toggle:active {
+  transform: translateY(0);
+}
+
+.theme-toggle svg {
+  display: block;
+}
+
+[data-theme='dark'] .theme-toggle {
+  background: var(--panel);
+  border-color: var(--line-strong);
+  color: var(--ink);
+}
+
+[data-theme='dark'] .theme-toggle:hover {
+  background: var(--green-soft);
+  border-color: var(--green);
+  color: var(--green);
+}
+
 .spin { animation: spin 1s linear infinite; }
 
 @keyframes spin { to { transform: rotate(360deg); } }

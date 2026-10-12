@@ -133,22 +133,32 @@ history for private repositories.
 
 Semgrep is optional at runtime and reports `unavailable` when its CLI or the
 project rules file is absent. On Windows, install it in a project-local virtual
-environment so Semgrep does not need a system-wide installation:
+environment so Semgrep does not need a system-wide installation.
+
+Python is required to create the virtual environment. If Python is not already
+installed, get it from python.org or install with `winget`:
+
+```powershell
+winget install Python.Python.3.12 --accept-source-agreements --accept-package-agreements
+```
+
+Then create the venv and install Semgrep:
 
 ```powershell
 python -m venv .venv-semgrep
+.\.venv-semgrep\Scripts\python.exe -m pip install --upgrade pip
 .\.venv-semgrep\Scripts\python.exe -m pip install semgrep
 .\.venv-semgrep\Scripts\semgrep.exe --version
 ```
 
-The backend checks `SEMGREP_PATH`, then `.venv-semgrep\Scripts\semgrep.exe`,
+The backend checks `SEMGREP_PATH`, then `.venv-semgrep\Scripts/semgrep.exe`,
 then `PATH`. To use a different executable path, set `SEMGREP_PATH` in the
 backend process environment (an absolute path is recommended). No global PATH
 change is required. Verify the CLI before scanning. A real invocation from the
 project root is:
 
 ```powershell
-semgrep scan --config .semgrep.yml --json --metrics=off <temporary-scan-workspace>
+.\.venv-semgrep\Scripts\semgrep.exe scan --config .semgrep.yml --json --metrics=off <temporary-scan-workspace>
 ```
 
 The scanner does not install Semgrep automatically. npm audits require a
@@ -156,6 +166,17 @@ The scanner does not install Semgrep automatically. npm audits require a
 project directory. A project missing its lockfile is reported as `skipped` with
 `findings: null`; it is not counted as a zero-vulnerability audit. Generate and
 commit lockfiles in each npm project to enable those audits.
+
+#### Scanner status semantics
+
+Each scanner reports one of `completed`, `partial`, `skipped`, `unavailable`, or
+`failed`. A scanner that did not run reports `findings: null`, never `0`, so a
+scan with no completed scanners is not mistaken for a clean scan. npm audit
+aggregates per-project statuses: a project missing its lockfile is `skipped`
+with `findings: null`; a project whose audit failed is `failed` with
+`findings: null`; only a successful audit reports a count. When some projects
+succeed and others fail, the aggregate status is `partial` and
+`findings: null` at the aggregate level.
 
 ### Environment and deployment
 
@@ -165,6 +186,54 @@ for authenticated repository listing/private access), `PORT` (default 3000),
 `OPENAI_API_KEY`, `OPENAI_MODEL`, and `OPENAI_BASE_URL`. Never place GitHub or
 OpenAI credentials in `client/.env` or any `VITE_*` variable.
 
+### GitHub Actions CI/CD
+
+Two workflows live under `.github/workflows/`:
+
+- **`.github/workflows/ci.yml`** — runs on `push` to `main` and `pull_request`
+  targeting `main`. It lints, builds, and tests both the NestJS backend
+  (`server/`) and the React dashboard (`client/`). Artifacts are uploaded for
+  downstream jobs.
+- **`.github/workflows/security-scan.yml`** — runs on `workflow_dispatch`,
+  `push` to `main`, and `pull_request` targeting `main`. It installs Semgrep,
+  builds the backend, and executes the existing scanner through
+  `server/src/security-scan-cli.ts`, which reuses the compiled
+  `SecurityScannerService`. The scan report is published as an artifact and the
+  job fails if any scanner reports a `failed` status.
+
+#### Required permissions and secrets
+
+- Set the repository workflow token to **Read** for `contents` and `actions`.
+- No custom secrets are required: the scan uses the built-in
+  `${{ secrets.GITHUB_TOKEN }}`, which is least-privilege and scoped to the
+  current repository. It is never logged.
+- Forked pull requests do not run the security scan to avoid running untrusted
+  code with a privileged token; use `workflow_dispatch` on the base repository
+  instead.
+
+#### Running a workflow manually
+
+Open the **Actions** tab, select **Security Scan**, and choose **Run workflow**.
+Optionally pass `owner/repository` (e.g. `nestjs/nest`) and a `branch`; the
+default is the current repository's default branch.
+
+#### Automatic triggers
+
+- `push` to `main` runs both workflows.
+- `pull_request` targeting `main` runs both workflows; the security scan is
+  skipped for forks.
+- Concurrent runs on the same ref are cancelled to avoid duplicate executions.
+
+#### Inspecting failures and scan results
+
+- Failed jobs show the failing step inline. The security scan uploads
+  `security-scan-report` containing `scan-report.json` and `scan-stderr.log`.
+- A scan is treated as failed when any scanner reports `failed` (Semgrep, npm
+  audit, secret detection, or static analysis). A scan with skipped or
+  unavailable scanners is not treated as clean.
+- Local preview: build the backend (`npm run build` at the root), then run
+  `SCAN_TARGET_OWNER=<owner> SCAN_TARGET_REPO=<repo> [SCAN_TARGET_BRANCH=<branch>] [GITHUB_TOKEN=<token>] node dist/security-scan-cli.js`.
+
 For deployment, build `client/` with `npm run build` from that directory and
 serve its `dist/` assets through the chosen web server. Run the NestJS app from
 the project root with `npm run build` and `npm run start:prod`; configure the
@@ -172,6 +241,35 @@ production reverse proxy to forward `/repositories` to NestJS and provide a
 same-origin API base or appropriate `VITE_API_BASE_URL` at frontend build time.
 Keep `.env` outside source control and provide secrets through the deployment
 platform's secret manager.
+
+### Production setup checklist
+
+Before deploying, complete these steps once per environment:
+
+1. **Install dependencies** at the project root with `npm install`, then again
+   inside `client/` with `npm install`.
+2. **Install Semgrep** in the project-local virtual environment so the scanner
+   is available at runtime (see the Semgrep CLI section above). Set
+   `SEMGREP_PATH` to the absolute path of the executable if you place it
+   outside `.venv-semgrep/`.
+3. **Provide secrets through the environment**:
+   - `GITHUB_TOKEN` — required for authenticated repository listing and private
+     repository access. Never place it in `client/.env` or any `VITE_*`
+     variable.
+   - `OPENAI_API_KEY`, `OPENAI_MODEL`, and optionally `OPENAI_BASE_URL` for AI
+     analysis features.
+   - `PORT` (default `3000`) and `SCAN_HISTORY_PATH` (default
+     `data/scan-history.json`) if non-default values are needed.
+4. **Verify the scanners** by running a scan against the configured test
+   repository (`POST /repositories/test/scan`) and confirming that Semgrep,
+   npm audit, and secret detection each report a status of `completed`.
+5. **Build both apps**: `npm run build` at the root for the NestJS backend, and
+   `npm run build` inside `client/` for the React dashboard.
+6. **Run the test suite**: `npm run test` and `npm run test:e2e` at the root,
+   and `npm run test` inside `client/`.
+7. **Run lint**: `npm run lint` at the root, and `npm run lint` inside `client/`.
+8. **Start the backend** with `npm run start:prod` and serve the frontend
+   `client/dist/` through a static host or reverse proxy.
 
 ## AI analysis
 

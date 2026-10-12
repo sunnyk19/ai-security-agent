@@ -14,6 +14,7 @@ import {
   KeyRound,
   LoaderCircle,
   LockKeyhole,
+  Moon,
   Package,
   RefreshCw,
   ScanLine,
@@ -21,6 +22,7 @@ import {
   Shield,
   ShieldAlert,
   ShieldCheck,
+  Sun,
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { describeApiError, listBranches, listRepositories, listScanHistory, scanRepository } from './api';
@@ -155,7 +157,35 @@ function StatusPill({ name, status, message }: { name: string; status: ToolStatu
 }
 
 // Keep repository, branch, and scan state sourced from the NestJS API; do not fall back to sample findings.
+function useTheme() {
+  const [theme, setThemeState] = useState<'light' | 'dark'>(() => {
+    if (typeof localStorage !== 'undefined' && localStorage.getItem('sentinel-theme')) {
+      return localStorage.getItem('sentinel-theme') as 'light' | 'dark';
+    }
+    if (typeof window !== 'undefined' && window.matchMedia) {
+      return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    }
+    return 'light';
+  });
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem('sentinel-theme', theme);
+    }
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) {
+      meta.setAttribute('content', theme === 'dark' ? '#0e1411' : '#1b2b22');
+    }
+  }, [theme]);
+
+  const toggleTheme = () => setThemeState((prev) => (prev === 'dark' ? 'light' : 'dark'));
+
+  return { theme, toggleTheme };
+}
+
 function App() {
+  const { theme, toggleTheme } = useTheme();
   const [repositories, setRepositories] = useState<Repository[]>([]);
   const [repositoryPage, setRepositoryPage] = useState(1);
   const [hasMoreRepositories, setHasMoreRepositories] = useState(false);
@@ -327,9 +357,21 @@ function App() {
       <div className="main-column" id="dashboard">
         <header className="topbar">
           <div className="breadcrumb"><span>Security</span><span className="breadcrumb-divider">/</span><strong>Overview</strong></div>
-          <div className={`api-indicator api-${apiState}`}>
-            <span className="api-indicator-dot" />
-            {apiState === 'connecting' ? 'Connecting' : apiState === 'connected' ? 'API connected' : 'API unavailable'}
+          <div className="topbar-actions">
+            <div className={`api-indicator api-${apiState}`}>
+              <span className="api-indicator-dot" />
+              {apiState === 'connecting' ? 'Connecting' : apiState === 'connected' ? 'API connected' : 'API unavailable'}
+            </div>
+            <button
+              className="theme-toggle"
+              type="button"
+              aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
+              onClick={toggleTheme}
+              title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
+            >
+              {theme === 'dark' ? <Sun size={16} aria-hidden="true" /> : <Moon size={16} aria-hidden="true" />}
+              <span>{theme === 'dark' ? 'Light' : 'Dark'}</span>
+            </button>
           </div>
         </header>
 
