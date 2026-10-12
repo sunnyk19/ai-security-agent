@@ -58,9 +58,9 @@ jobs:
       - name: Install Semgrep CLI
         run: |
           python3 -m venv .venv-semgrep
-          .\.venv-semgrep\bin\python.exe -m pip install --upgrade pip
-          .\.venv-semgrep\bin\python.exe -m pip install semgrep
-          .\.venv-semgrep\bin\semgrep --version
+          .venv-semgrep/bin/pip install --upgrade pip
+          .venv-semgrep/bin/pip install semgrep
+          .venv-semgrep/bin/semgrep --version
         shell: bash
         continue-on-error: false
 

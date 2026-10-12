@@ -66,8 +66,12 @@ function main() {
       if (historyDir && !existsSync(historyDir)) {
         mkdirSync(historyDir, { recursive: true });
       }
+      const reportDir = resolve('scan-results');
+      if (!existsSync(reportDir)) {
+        mkdirSync(reportDir, { recursive: true });
+      }
       writeFileSync(
-        resolve('scan-results', 'scan-report.json'),
+        resolve(reportDir, 'scan-report.json'),
         JSON.stringify(report, null, 2),
         'utf8',
       );
