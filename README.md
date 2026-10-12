@@ -34,9 +34,11 @@ npm install
 npm run start:dev
 ```
 
-Public repositories work without credentials. Set `GITHUB_TOKEN` to analyze
-private repositories or to increase GitHub API rate limits. Copy `.env.example`
-to `.env` and set the token there; `.env` is gitignored.
+Public repository analysis and scans work without credentials. Repository listing
+uses GitHub's authenticated-user endpoint and requires `GITHUB_TOKEN`; private
+repository analysis also requires a token with access. Copy `.env.example` to
+`.env` and set the token there; `.env` is gitignored. Without a token the backend
+still starts, while repository listing returns an authentication error.
 
 ## Compile and run the project
 
@@ -80,6 +82,7 @@ for very large repositories; this is reported through `treeTruncated`.
 
 - `POST /repositories/test/scan` scans the configured test repository.
 - `POST /repositories/:owner/:repository/scan` scans a selected repository.
+- `GET /repositories/scan-history?limit=20` returns recent persisted scan summaries.
 
 The scanner performs read-only repository checks against the selected branch and
 returns an aggregate security report. It detects hardcoded secrets, unsafe
@@ -89,9 +92,12 @@ installed and `npm audit` separately for each project containing a
 `package.json` and `package-lock.json` or `npm-shrinkwrap.json`. Generated and
 dependency directories are excluded from project discovery.
 Repository files are limited to the first 100 JavaScript/TypeScript files and are
-removed from a temporary workspace after scanning. Dependency audit does not install
-packages or run lifecycle scripts. Each scanner reports whether it completed,
-was skipped, or is unavailable.
+removed from a temporary workspace after scanning. Pattern-based secret and static
+checks cover those selected JavaScript/TypeScript files; they do not replace a full
+repository-wide security review. Credential-like text in finding evidence is
+redacted before the API response, and finding evidence is omitted from scan history.
+Dependency audit does not install packages or run lifecycle scripts. Each scanner
+reports whether it completed, was skipped, or is unavailable.
 
 ## Security dashboard
 
@@ -114,31 +120,34 @@ token is never sent to the browser. The scan endpoint accepts an optional
 `{ "branch": "branch-name" }` JSON body and defaults to the repository's
 default branch when omitted.
 
+Successful scan reports are persisted in `data/scan-history.json` by default;
+set `SCAN_HISTORY_PATH` to choose another server-side path. The store retains at
+most 100 records, serializes writes atomically, and omits finding evidence so
+source snippets are not written to disk. This is a single-instance local store,
+not a multi-replica database. The history endpoint has no per-user application
+authorization, like the existing scan endpoints; keep the API behind a trusted
+network or an authenticated reverse proxy. Do not enable public access to scan
+history for private repositories.
+
 ### Semgrep CLI
 
 Semgrep is optional at runtime and reports `unavailable` when its CLI or the
-project rules file is absent. On Windows, install it in WSL rather than exposing
-the host environment to scanned repository code:
+project rules file is absent. On Windows, install it in a project-local virtual
+environment so Semgrep does not need a system-wide installation:
 
 ```powershell
-wsl --install -d Ubuntu
+python -m venv .venv-semgrep
+.\.venv-semgrep\Scripts\python.exe -m pip install semgrep
+.\.venv-semgrep\Scripts\semgrep.exe --version
 ```
 
-After installing/restarting WSL, open Ubuntu and run:
+The backend checks `SEMGREP_PATH`, then `.venv-semgrep\Scripts\semgrep.exe`,
+then `PATH`. To use a different executable path, set `SEMGREP_PATH` in the
+backend process environment (an absolute path is recommended). No global PATH
+change is required. Verify the CLI before scanning. A real invocation from the
+project root is:
 
-```bash
-sudo apt update
-sudo apt install -y python3 python3-pip pipx
-pipx ensurepath
-pipx install semgrep
-semgrep --version
-```
-
-Make the CLI available to the NestJS process (for example, run the backend
-inside the same WSL distribution) and verify with `semgrep --version` before
-scanning. A real invocation from the project root is:
-
-```bash
+```powershell
 semgrep scan --config .semgrep.yml --json --metrics=off <temporary-scan-workspace>
 ```
 

@@ -61,9 +61,11 @@ describe('findHardcodedSecrets', () => {
   });
 
   it('redacts secrets before source context is sent to an AI provider', () => {
-    const source = "const token = 'github_pat_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';";
+    const source =
+      "const token = 'github_pat_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';\nconst authorization = 'Bearer abc.def.ghi';";
 
     expect(redactSecrets(source)).not.toContain('github_pat_');
+    expect(redactSecrets(source)).not.toContain('abc.def.ghi');
     expect(redactSecrets(source)).toContain('[REDACTED]');
   });
 });

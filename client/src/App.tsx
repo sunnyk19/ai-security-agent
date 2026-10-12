@@ -10,6 +10,7 @@ import {
   FileCode2,
   GitBranch,
   Globe,
+  History,
   KeyRound,
   LoaderCircle,
   LockKeyhole,
@@ -22,11 +23,12 @@ import {
   ShieldCheck,
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { describeApiError, listBranches, listRepositories, scanRepository } from './api';
+import { describeApiError, listBranches, listRepositories, listScanHistory, scanRepository } from './api';
 import type {
   Branch,
   FindingSeverity,
   Repository,
+  ScanHistoryRecord,
   ScanReport,
   SecurityFinding,
   ToolStatus,
@@ -79,6 +81,11 @@ function scannerName(scanner: SecurityFinding['scanner']) {
 
 function getCoverageNotes(report: ScanReport) {
   const notes: string[] = [];
+  if (report.treeTruncated) notes.push('GitHub truncated the repository tree');
+  if (report.sourceFilesTruncated) notes.push('source-file limit reached');
+  if (report.sourceFilesSkipped > 0) {
+    notes.push(`${report.sourceFilesSkipped} source files could not be scanned`);
+  }
   if (report.scanners.semgrep.status !== 'completed') {
     notes.push(`Semgrep ${report.scanners.semgrep.status}`);
   }
@@ -165,6 +172,9 @@ function App() {
   const [scanning, setScanning] = useState(false);
   const [scanError, setScanError] = useState('');
   const [report, setReport] = useState<ScanReport | null>(null);
+  const [historyRecords, setHistoryRecords] = useState<ScanHistoryRecord[]>([]);
+  const [selectedHistoryId, setSelectedHistoryId] = useState('');
+  const [historyError, setHistoryError] = useState('');
 
   useEffect(() => {
     const controller = new AbortController();
@@ -181,6 +191,16 @@ function App() {
       })
       .finally(() => {
         if (!controller.signal.aborted) setRepositoryLoading(false);
+      });
+    return () => controller.abort();
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    listScanHistory(20, controller.signal)
+      .then(({ records }) => setHistoryRecords(records))
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted) setHistoryError(describeApiError(error));
       });
     return () => controller.abort();
   }, []);
@@ -245,13 +265,39 @@ function App() {
     setScanning(true);
     setScanError('');
     setReport(null);
+    setSelectedHistoryId('');
     try {
-      setReport(await scanRepository(owner, repository, selectedBranch));
+      const result = await scanRepository(owner, repository, selectedBranch);
+      setReport(result);
+      if (result.history?.persisted && result.history.id) {
+        setSelectedHistoryId(result.history.id);
+        setHistoryError('');
+        try {
+          const history = await listScanHistory();
+          setHistoryRecords(history.records);
+        } catch (error) {
+          setHistoryError(describeApiError(error));
+        }
+      } else if (result.history?.message) {
+        setHistoryError(result.history.message);
+      }
     } catch (error) {
       setScanError(describeApiError(error));
     } finally {
       setScanning(false);
     }
+  }
+
+  function restoreHistory(recordId: string) {
+    setSelectedHistoryId(recordId);
+    const record = historyRecords.find((item) => item.id === recordId);
+    if (!record) return;
+    setReport({
+      ...record,
+      findings: record.findings.map((finding) => ({ ...finding, evidence: finding.evidence ?? '' })),
+      history: { id: record.id, persisted: true },
+    });
+    setScanError('');
   }
 
   const apiState = repositoryLoading ? 'connecting' : repositoryError ? 'offline' : 'connected';
@@ -423,6 +469,27 @@ function App() {
               ) : (
                 <span className="awaiting-scan">{scanning ? 'Analysis in progress' : 'Awaiting scan'}</span>
               )}
+            </div>
+
+            <div className="history-control-row">
+              <label className="history-picker">
+                <History size={14} aria-hidden="true" />
+                <span>Recent scans</span>
+                <select
+                  aria-label="Recent scan history"
+                  value={selectedHistoryId}
+                  onChange={(event) => restoreHistory(event.target.value)}
+                  disabled={historyRecords.length === 0}
+                >
+                  <option value="">Select a saved scan</option>
+                  {historyRecords.map((record) => (
+                    <option key={record.id} value={record.id}>
+                      {record.repository} · {record.branch} · {new Date(record.scannedAt).toLocaleString()}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {historyError && <span className="history-message" role="status">{historyError}</span>}
             </div>
 
             {scanning && <div className="scan-progress"><span className="progress-line" /><span>Retrieving repository tree and running configured scanners</span></div>}

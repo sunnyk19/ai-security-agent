@@ -12,14 +12,8 @@ import { GitHubService } from './github.service.js';
       useFactory: () => {
         const githubToken = process.env.GITHUB_TOKEN?.trim();
 
-        if (!githubToken) {
-          throw new Error(
-            'GITHUB_TOKEN is required. Configure it in your environment or .env without committing the secret value.',
-          );
-        }
-
         return new Octokit({
-          auth: githubToken,
+          ...(githubToken ? { auth: githubToken } : {}),
           userAgent: 'ai-security-agent',
           request: {
             timeout: 15000,

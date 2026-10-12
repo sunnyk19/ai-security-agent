@@ -1,9 +1,20 @@
-import { Body, Controller, Param, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import { ScanHistoryService } from './scan-history.service.js';
 import { SecurityScannerService } from './security-scanner.service.js';
 
 @Controller('repositories')
 export class SecurityController {
-  constructor(private readonly scanner: SecurityScannerService) {}
+  constructor(
+    private readonly scanner: SecurityScannerService,
+    private readonly history: ScanHistoryService,
+  ) {}
+
+  @Get('scan-history')
+  async listScanHistory(@Query('limit') limit?: string) {
+    const parsedLimit = limit === undefined ? undefined : Number(limit);
+    const records = await this.history.list(parsedLimit);
+    return { records, count: records.length };
+  }
 
   @Post('test/scan')
   scanTestRepository() {

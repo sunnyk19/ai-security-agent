@@ -1,4 +1,5 @@
 export type FindingSeverity = 'critical' | 'high' | 'medium' | 'low' | 'info';
+export type ToolStatus = 'completed' | 'partial' | 'unavailable' | 'skipped' | 'failed';
 
 export type SecurityFinding = {
   id: string;
@@ -31,4 +32,42 @@ export type SecurityFinding = {
 export type SourceFile = {
   path: string;
   content: string;
+};
+
+export type NpmProjectAuditStatus = {
+  directory: string;
+  status: ToolStatus;
+  findings: number | null;
+  message?: string;
+};
+
+export type SecurityScanReport = {
+  repository: string;
+  branch: string;
+  scannedAt: string;
+  filesScanned: number;
+  sourceFilesSkipped: number;
+  sourceFileLimit: number;
+  sourceFilesTruncated: boolean;
+  treeTruncated: boolean;
+  scanners: {
+    semgrep: { status: ToolStatus; findings: number | null; message: string | null };
+    npmAudit: {
+      status: ToolStatus;
+      findings: number | null;
+      message: string | null;
+      projects: NpmProjectAuditStatus[];
+    };
+    secretDetection: { status: 'completed'; findings: number };
+  };
+  summary: {
+    total: number;
+    critical: number;
+    high: number;
+    medium: number;
+    low: number;
+    info: number;
+  };
+  findings: SecurityFinding[];
+  history?: { id: string | null; persisted: boolean; message?: string };
 };

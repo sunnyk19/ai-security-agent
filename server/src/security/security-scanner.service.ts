@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { Octokit } from '@octokit/rest';
 import { spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
@@ -13,12 +14,16 @@ import { GITHUB_CLIENT } from '../github/github.tokens.js';
 import {
   findCommonMisconfigurations,
   findHardcodedSecrets,
+  redactSecrets,
 } from './secret-scanner.js';
 import type {
   FindingSeverity,
+  SecurityScanReport,
   SecurityFinding,
   SourceFile,
+  ToolStatus,
 } from './security.types.js';
+import { ScanHistoryService } from './scan-history.service.js';
 
 const MAX_SOURCE_FILES = 100;
 const MAX_FILE_BYTES = 1024 * 1024;
@@ -28,7 +33,6 @@ const EXCLUDED_PATH = /(^|\/)(node_modules|dist|build|coverage|vendor|\.git)\//i
 const EXCLUDED_PROJECT_PATH =
   /(^|\/)(?:node_modules|dist|build|coverage|vendor|\.git|\.next|\.nuxt|\.output|\.turbo|\.cache|\.vercel|\.svelte-kit|\.angular|\.parcel-cache|\.serverless|out|target|tmp|temp|artifacts|generated|storybook-static|playwright-report|test-results|bower_components)(?:\/|$)/i;
 
-type ToolStatus = 'completed' | 'partial' | 'unavailable' | 'skipped' | 'failed';
 type ToolResult = {
   status: ToolStatus;
   findings: SecurityFinding[];
@@ -40,12 +44,7 @@ type NpmProject = {
   packagePath: string | null;
   lockPath: string | null;
 };
-type NpmAuditProjectStatus = {
-  directory: string;
-  status: ToolStatus;
-  findings: number | null;
-  message?: string;
-};
+type NpmAuditProjectStatus = SecurityScanReport['scanners']['npmAudit']['projects'][number];
 type NpmAuditFileResult =
   | { status: 'completed'; content: string }
   | { status: 'skipped'; message: string }
@@ -190,9 +189,12 @@ function isSemgrepOutput(value: unknown): value is SemgrepOutput {
 
 @Injectable()
 export class SecurityScannerService {
-  constructor(@Inject(GITHUB_CLIENT) private readonly github: Octokit) {}
+  constructor(
+    @Inject(GITHUB_CLIENT) private readonly github: Octokit,
+    private readonly scanHistory: ScanHistoryService,
+  ) {}
 
-  async scan(owner: string, repository: string, branch?: string) {
+  async scan(owner: string, repository: string, branch?: string): Promise<SecurityScanReport> {
     let workspace: string | undefined;
 
     try {
@@ -261,11 +263,12 @@ export class SecurityScannerService {
           (left.line ?? 0) - (right.line ?? 0),
       );
 
-      return {
+      const report: SecurityScanReport = {
         repository: repositoryResponse.data.full_name,
         branch: selectedBranch,
         scannedAt: new Date().toISOString(),
         filesScanned: sourceFiles.length,
+        sourceFilesSkipped: selectedSourcePaths.length - sourceFiles.length,
         sourceFileLimit: MAX_SOURCE_FILES,
         sourceFilesTruncated: sourcePaths.length > MAX_SOURCE_FILES,
         treeTruncated: treeResponse.data.truncated,
@@ -289,6 +292,22 @@ export class SecurityScannerService {
         summary: this.summarize(findings),
         findings,
       };
+      try {
+        const historyRecord = await this.scanHistory.save(report);
+        return {
+          ...report,
+          history: { id: historyRecord.id, persisted: true },
+        };
+      } catch {
+        return {
+          ...report,
+          history: {
+            id: null,
+            persisted: false,
+            message: 'Scan completed, but the report could not be added to scan history.',
+          },
+        };
+      }
     } catch (error) {
       if ((error as { status?: number }).status === 404) {
         throw new NotFoundException(
@@ -408,7 +427,7 @@ export class SecurityScannerService {
     }
 
     const result = await this.runCommand(
-      'semgrep',
+      this.getSemgrepCommand(),
       ['scan', '--config', configPath, '--json', '--metrics=off', workspace],
       workspace,
     );
@@ -423,14 +442,14 @@ export class SecurityScannerService {
       return {
         status: 'failed',
         findings: [],
-        message: result.error ?? result.stderr.slice(0, 300),
+        message: 'Semgrep did not return JSON output.',
       };
     }
     if (result.code !== 0 && result.code !== 1) {
       return {
         status: 'failed',
         findings: [],
-        message: result.stderr.slice(0, 300) || 'Semgrep exited with an error.',
+        message: 'Semgrep exited with an error.',
       };
     }
 
@@ -448,7 +467,7 @@ export class SecurityScannerService {
         return {
           status: 'failed',
           findings: [],
-          message: output.errors[0].message ?? 'Semgrep reported a scan error.',
+          message: 'Semgrep reported a scan error.',
         };
       }
 
@@ -468,10 +487,12 @@ export class SecurityScannerService {
           severity: this.normalizeSeverity(item.extra.severity),
           file,
           line: item.start?.line ?? null,
-          vulnerability: item.extra.message,
-          evidence: item.extra.lines?.trim() ?? '',
-          possibleImpact:
-            item.extra.metadata?.impact ?? 'The issue may expose the application to compromise.',
+          vulnerability: redactSecrets(item.extra.message),
+          evidence: redactSecrets(item.extra.lines?.trim() ?? ''),
+          possibleImpact: redactSecrets(
+            item.extra.metadata?.impact ??
+              'The issue may expose the application to compromise.',
+          ),
           reference: item.extra.metadata?.references?.[0],
         });
       }
@@ -830,6 +851,25 @@ export class SecurityScannerService {
         result.stderr,
       )
     );
+  }
+
+  private getSemgrepCommand(): string {
+    const configuredPath = process.env.SEMGREP_PATH?.trim();
+    if (configuredPath) {
+      return isAbsolute(configuredPath)
+        ? configuredPath
+        : resolve(process.cwd(), configuredPath);
+    }
+
+    const virtualEnvironmentCommand = resolve(
+      process.cwd(),
+      process.platform === 'win32'
+        ? '.venv-semgrep/Scripts/semgrep.exe'
+        : '.venv-semgrep/bin/semgrep',
+    );
+    return existsSync(virtualEnvironmentCommand)
+      ? virtualEnvironmentCommand
+      : 'semgrep';
   }
 
   private normalizeSeverity(severity?: string): FindingSeverity {

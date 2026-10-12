@@ -47,6 +47,7 @@ export type ScanReport = {
   branch: string;
   scannedAt: string;
   filesScanned: number;
+  sourceFilesSkipped: number;
   treeTruncated: boolean;
   sourceFilesTruncated: boolean;
   scanners: {
@@ -73,6 +74,12 @@ export type ScanReport = {
     info: number;
   };
   findings: SecurityFinding[];
+  history?: { id: string | null; persisted: boolean; message?: string };
+};
+
+export type ScanHistoryRecord = Omit<ScanReport, 'findings' | 'history'> & {
+  id: string;
+  findings: Array<Omit<SecurityFinding, 'evidence'> & { evidence?: string }>;
 };
 
 export type RepositoryPage = {

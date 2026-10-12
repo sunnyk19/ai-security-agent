@@ -128,7 +128,11 @@ export function redactSecrets(content: string): string {
     .replace(/\b(?:github_pat_[A-Za-z0-9_]{20,}|gh[pousr]_[A-Za-z0-9]{20,})\b/g, '[REDACTED TOKEN]')
     .replace(/\bAKIA[0-9A-Z]{16}\b/g, '[REDACTED ACCESS KEY]')
     .replace(
-      /(\b(?:api[_-]?key|client[_-]?secret|password|secret|token)\b\s*[:=]\s*)(['"])[^'"\r\n]+\2/gi,
+      /(\b(?:api[_-]?key|access[_-]?key|auth(?:orization)?|bearer|client[_-]?secret|credential|password|private[_-]?key|secret|token)\b\s*[:=]\s*)(['"])[^'"\r\n]+\2/gi,
       '$1$2[REDACTED]$2',
+    )
+    .replace(
+      /(\b(?:authorization|proxy-authorization)\b\s*[:=]\s*)(['"]?)(?:Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+/gi,
+      '$1$2[REDACTED]',
     );
 }

@@ -1,9 +1,11 @@
 node_modules/
+.venv-semgrep/
 dist/
 server/src/**/*.js
 server/src/**/*.d.ts
 server/src/**/*.js.map
 coverage/
+data/scan-history.json
 .env
 .env.*
 !.env.example

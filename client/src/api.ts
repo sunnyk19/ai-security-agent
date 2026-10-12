@@ -1,4 +1,4 @@
-import type { Branch, RepositoryPage, ScanReport } from './types';
+import type { Branch, RepositoryPage, ScanHistoryRecord, ScanReport } from './types';
 
 const apiBase = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/$/, '');
 
@@ -64,4 +64,11 @@ export function describeApiError(error: unknown, context: 'repositories' | 'scan
       : 'GitHub denied this scan request. Check backend token access and repository permissions.';
   }
   return error instanceof Error ? error.message : 'The request could not be completed.';
+}
+
+export function listScanHistory(limit = 20, signal?: AbortSignal) {
+  return request<{ records: ScanHistoryRecord[]; count: number }>(
+    `/repositories/scan-history?limit=${encodeURIComponent(String(limit))}`,
+    { signal },
+  );
 }

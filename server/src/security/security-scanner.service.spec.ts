@@ -1,5 +1,6 @@
 import { Octokit } from '@octokit/rest';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { ScanHistoryService } from './scan-history.service.js';
 import { SecurityScannerService } from './security-scanner.service.js';
 
 type CommandResult = {
@@ -31,6 +32,7 @@ describe('SecurityScannerService npm audit', () => {
   let tree: Array<{ type: string; path: string }>;
   let repositoryFiles: Map<string, string>;
   let runCommand: ReturnType<typeof vi.spyOn>;
+  const scanHistory = { save: vi.fn() };
 
   const addProject = (directory: string, lockName = 'package-lock.json') => {
     const prefix = directory ? `${directory}/` : '';
@@ -47,10 +49,15 @@ describe('SecurityScannerService npm audit', () => {
   const auditCalls = () =>
     runCommand.mock.calls.filter(([, args]) => args.includes('audit'));
   const semgrepCalls = () =>
-    runCommand.mock.calls.filter(([command]) => command === 'semgrep');
+    runCommand.mock.calls.filter(([, args]) => args[0] === 'scan');
 
   beforeEach(() => {
     vi.clearAllMocks();
+    scanHistory.save.mockImplementation(async (report) => ({
+      ...report,
+      id: 'test-history-id',
+      findings: report.findings.map(({ evidence: _evidence, ...finding }) => finding),
+    }));
     tree = [];
     repositoryFiles = new Map();
     github.rest.repos.get.mockResolvedValue({
@@ -78,7 +85,10 @@ describe('SecurityScannerService npm audit', () => {
       };
     });
 
-    service = new SecurityScannerService(github as unknown as Octokit);
+    service = new SecurityScannerService(
+      github as unknown as Octokit,
+      scanHistory as unknown as ScanHistoryService,
+    );
     runCommand = vi.spyOn(service as unknown as ScannerInternals, 'runCommand');
     runCommand.mockImplementation(async (_command, args) =>
       args.includes('audit')
@@ -96,6 +106,20 @@ describe('SecurityScannerService npm audit', () => {
       branch: 'feature/security-review',
     });
     expect(result.branch).toBe('feature/security-review');
+    expect(result.history).toEqual({ id: 'test-history-id', persisted: true });
+  });
+
+  it('returns scan data when persistence fails and marks history as unsaved', async () => {
+    scanHistory.save.mockRejectedValue(new Error('disk unavailable'));
+
+    const result = await service.scan('owner', 'repository');
+
+    expect(result.scanners.secretDetection.status).toBe('completed');
+    expect(result.history).toEqual({
+      id: null,
+      persisted: false,
+      message: 'Scan completed, but the report could not be added to scan history.',
+    });
   });
 
   it('normalizes Semgrep rule, severity, relative path, and optional line details', async () => {
@@ -168,6 +192,20 @@ describe('SecurityScannerService npm audit', () => {
     ]);
   });
 
+  it('uses the configured Semgrep executable path', async () => {
+    const originalPath = process.env.SEMGREP_PATH;
+    process.env.SEMGREP_PATH = process.execPath;
+
+    try {
+      await service.scan('owner', 'repository');
+
+      expect(semgrepCalls()[0][0]).toBe(process.execPath);
+    } finally {
+      if (originalPath === undefined) delete process.env.SEMGREP_PATH;
+      else process.env.SEMGREP_PATH = originalPath;
+    }
+  });
+
   it.each([
     ['JSON string', JSON.stringify('not a Semgrep report')],
     ['JSON number', JSON.stringify(3)],
@@ -185,6 +223,52 @@ describe('SecurityScannerService npm audit', () => {
 
     expect(result.scanners.semgrep.status).toBe('failed');
     expect(result.scanners.semgrep.findings).toBeNull();
+  });
+
+  it('redacts credential evidence before returning Semgrep findings', async () => {
+    tree.push({ type: 'blob', path: 'src/handler.ts' });
+    repositoryFiles.set('src/handler.ts', 'const safe = true;');
+    const token = 'github_pat_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    runCommand.mockImplementation(async (command, _args) =>
+      command === 'semgrep'
+        ? {
+            code: 1,
+            stdout: JSON.stringify({
+              results: [{
+                check_id: 'javascript.test-secret',
+                path: 'src/handler.ts',
+                extra: {
+                  message: `Credential exposed: ${token}`,
+                  lines: `const token = '${token}';`,
+                },
+              }],
+            }),
+            stderr: '',
+          }
+        : { code: 0, stdout: JSON.stringify({ vulnerabilities: {} }), stderr: '' },
+    );
+
+    const result = await service.scan('owner', 'repository');
+
+    expect(JSON.stringify(result)).not.toContain(token);
+    expect(result.findings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          scanner: 'semgrep',
+          vulnerability: expect.not.stringContaining(token),
+          evidence: expect.not.stringContaining(token),
+        }),
+      ]),
+    );
+  });
+
+  it('counts source files that GitHub could not provide', async () => {
+    tree.push({ type: 'blob', path: 'src/unavailable.ts' });
+
+    const result = await service.scan('owner', 'repository');
+
+    expect(result.filesScanned).toBe(0);
+    expect(result.sourceFilesSkipped).toBe(1);
   });
 
   it('fails instead of reporting a finding outside the scan workspace', async () => {

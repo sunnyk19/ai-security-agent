@@ -6,6 +6,7 @@ import { vi } from 'vitest';
 import { AppModule } from './../src/app.module.js';
 import { GitHubService } from './../src/github/github.service.js';
 import { GITHUB_CLIENT } from './../src/github/github.tokens.js';
+import { ScanHistoryService } from './../src/security/scan-history.service.js';
 import { SecurityScannerService } from './../src/security/security-scanner.service.js';
 
 describe('AppController (e2e)', () => {
@@ -24,6 +25,7 @@ describe('AppController (e2e)', () => {
     findings: [],
     summary: { total: 0, critical: 0, high: 0, medium: 0, low: 0, info: 0 },
   });
+  const listScanHistory = vi.fn().mockResolvedValue([]);
 
   beforeEach(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -39,6 +41,8 @@ describe('AppController (e2e)', () => {
       })
       .overrideProvider(GITHUB_CLIENT)
       .useValue({})
+      .overrideProvider(ScanHistoryService)
+      .useValue({ list: listScanHistory })
       .overrideProvider(SecurityScannerService)
       .useValue({
         scan: scanRepository,
@@ -101,6 +105,20 @@ describe('AppController (e2e)', () => {
       'hello-world',
       'feature/security-review',
     );
+  });
+
+  it('/repositories/scan-history (GET) returns recent persisted records', async () => {
+    listScanHistory.mockResolvedValueOnce([{ id: 'history-1', repository: 'owner/repository' }]);
+
+    await request(app.getHttpServer())
+      .get('/repositories/scan-history?limit=5')
+      .expect(200)
+      .expect({
+        records: [{ id: 'history-1', repository: 'owner/repository' }],
+        count: 1,
+      });
+
+    expect(listScanHistory).toHaveBeenCalledWith(5);
   });
 
   afterEach(async () => {

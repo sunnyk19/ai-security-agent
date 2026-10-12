@@ -4,6 +4,7 @@ import { GitHubService } from './github.service.js';
 
 describe('GitHubService', () => {
   const github = {
+    paginate: vi.fn(),
     rest: {
       repos: {
         get: vi.fn(),
@@ -45,6 +46,7 @@ describe('GitHubService', () => {
     github.rest.repos.listLanguages.mockResolvedValue({
       data: { TypeScript: 5000 },
     });
+    github.paginate.mockResolvedValue([{ name: 'main' }]);
     github.rest.git.getCommit.mockResolvedValue({
       data: { tree: { sha: 'tree-sha' } },
     });
@@ -187,9 +189,10 @@ describe('GitHubService', () => {
         private: false,
       },
     });
-    github.rest.repos.listBranches.mockResolvedValue({
-      data: [{ name: 'main' }, { name: 'feature/branch-selection' }],
-    });
+    github.paginate.mockResolvedValue([
+      { name: 'main', protected: true, commit: { sha: 'main-sha' } },
+      { name: 'feature/branch-selection', protected: false, commit: { sha: 'branch-sha' } },
+    ]);
     github.rest.repos.getBranch.mockResolvedValue({
       data: { name: 'feature/branch-selection', commit: { sha: 'branch-sha' } },
     });
@@ -221,6 +224,10 @@ describe('GitHubService', () => {
       repo: 'hello-world',
       branch: 'feature/branch-selection',
     });
+    expect(github.paginate).toHaveBeenCalledWith(
+      github.rest.repos.listBranches,
+      { owner: 'octocat', repo: 'hello-world', per_page: 100 },
+    );
   });
 
   it('reports repositories that GitHub cannot find', async () => {

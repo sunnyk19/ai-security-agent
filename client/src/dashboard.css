@@ -166,6 +166,10 @@
 .coverage-failed { background: #fff0ed; color: #a44737; }
 .context-divider { background: #d6ddd6; height: 13px; margin: 0 4px; width: 1px; }
 .awaiting-scan { background: #edf1ed; border-radius: 4px; padding: 6px 8px; }
+.history-control-row { align-items: center; display: flex; justify-content: flex-end; margin: -6px 0 14px; }
+.history-picker { align-items: center; color: #738077; display: flex; font-size: 10px; gap: 7px; }
+.history-picker select { background: #fff; border: 1px solid var(--line); border-radius: 4px; color: var(--ink); font: 10px var(--sans); max-width: min(390px, 55vw); min-height: 30px; padding: 0 8px; }
+.history-message { color: #93633b; font-size: 10px; margin-left: 10px; }
 .scan-progress { align-items: center; color: var(--green); display: flex; font-size: 11px; gap: 10px; margin: 0 0 16px; }
 .progress-line { animation: progress 1.5s ease-in-out infinite; background: var(--green); border-radius: 4px; height: 3px; width: 54px; }
 
@@ -285,6 +289,9 @@
   .load-more { margin-left: auto; }
   .results-section { margin-top: 30px; }
   .results-heading { align-items: flex-start; flex-direction: column; gap: 10px; }
+  .history-control-row { justify-content: flex-start; margin: 0 0 13px; }
+  .history-picker { align-items: flex-start; flex-wrap: wrap; }
+  .history-picker select { max-width: 100%; width: 100%; }
   .scan-context { flex-wrap: wrap; }
   .summary-grid { gap: 7px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .summary-stat { min-height: 82px; padding: 11px 12px; }

@@ -155,13 +155,13 @@ export class GitHubService {
   async getBranches(owner: string, repository: string) {
     try {
       const repositoryData = await this.getRepositoryMetadata(owner, repository);
-      const branchesResponse = await this.github.rest.repos.listBranches({
+      const branches = await this.github.paginate(this.github.rest.repos.listBranches, {
         owner,
         repo: repository,
         per_page: 100,
       });
 
-      return (branchesResponse.data ?? []).map((branch) => ({
+      return branches.map((branch) => ({
         name: branch.name,
         default: branch.name === repositoryData.defaultBranch,
         protected: Boolean(branch.protected),
