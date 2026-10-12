@@ -1,0 +1,52 @@
+rules:
+  - id: javascript.sql-injection
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: User-controlled data may be concatenated into a SQL query.
+    metadata:
+      category: security
+      impact: An attacker may alter query logic or access unauthorized records.
+    pattern-either:
+      - pattern: $DB.query($SQL + $INPUT)
+      - pattern: $DB.query(`...${$INPUT}...`)
+
+  - id: javascript.xss-innerhtml
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: Assigning untrusted data to innerHTML may enable cross-site scripting.
+    metadata:
+      category: security
+      impact: An attacker may execute script in another user's browser.
+    pattern: $ELEMENT.innerHTML = $INPUT
+
+  - id: javascript.command-injection
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: User-controlled data may reach a shell command.
+    metadata:
+      category: security
+      impact: An attacker may execute operating-system commands with application privileges.
+    pattern-either:
+      - pattern: exec($COMMAND + $INPUT)
+      - pattern: execSync($COMMAND + $INPUT)
+      - pattern: exec(`...${$INPUT}...`)
+
+  - id: javascript.path-traversal
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: User-controlled path data may allow traversal outside the intended directory.
+    metadata:
+      category: security
+      impact: An attacker may read or overwrite files outside the intended directory.
+    pattern-either:
+      - pattern: readFile($BASE + $INPUT, ...)
+      - pattern: readFileSync($BASE + $INPUT, ...)
+
+  - id: javascript.jwt-decode-without-verification
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: jwt.decode does not verify a token signature; use jwt.verify for authentication.
+    metadata:
+      category: security
+      impact: Unverified claims may be trusted during authentication or authorization.
+    pattern: $JWT.decode($TOKEN, ...)

@@ -1,0 +1,10 @@
+node_modules/
+dist/
+server/src/**/*.js
+server/src/**/*.d.ts
+server/src/**/*.js.map
+coverage/
+.env
+.env.*
+!.env.example
+*.tsbuildinfo
